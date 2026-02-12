@@ -5,6 +5,7 @@ import random
 import string
 import tkinter.font as font
 import ctypes
+import subprocess
 
 
 def est_admin() -> bool:
@@ -98,6 +99,80 @@ def generer_mot_de_passe(longueur: int = 16) -> str:
     return "".join(mot_de_passe)
 
 
+def _run_powershell(cmd: str) -> str:
+    """Exécute une commande PowerShell et renvoie la sortie (stdout) en texte, ou une chaîne vide en cas d'erreur."""
+    try:
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", cmd],
+            capture_output=True,
+            text=True,
+            creationflags=creationflags,
+        )
+        if completed.returncode != 0:
+            return ""
+        return completed.stdout.strip()
+    except Exception:
+        return ""
+
+
+def check_parefeu_tous_profils_actif() -> bool:
+    """Vérifie que le pare-feu est activé sur tous les profils."""
+    sortie = _run_powershell(
+        "(Get-NetFirewallProfile | Where-Object { -not $_.Enabled }).Count"
+    )
+    try:
+        return int(sortie) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def check_bitlocker_c_active() -> bool:
+    """Vérifie que BitLocker est activé sur le disque C:."""
+    sortie = _run_powershell(
+        "(Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue).ProtectionStatus"
+    )
+    return sortie.strip() == "1"
+
+
+def check_smbv1_desactive() -> bool:
+    """Vérifie que le protocole SMBv1 est désactivé."""
+    sortie = _run_powershell(
+        "(Get-WindowsOptionalFeature -Online -FeatureName 'SMB1Protocol').State"
+    )
+    return sortie.strip().lower() == "disabled"
+
+
+def check_defender_protections() -> bool:
+    """Vérifie que la protection en temps réel de Windows Defender est activée."""
+    sortie = _run_powershell(
+        "(Get-MpComputerStatus -ErrorAction SilentlyContinue).RealTimeProtectionEnabled"
+    )
+    return sortie.strip().lower() == "true"
+
+
+def check_mises_a_jour_auto() -> bool:
+    """Vérifie que les mises à jour automatiques sont activées (AUOptions >= 3)."""
+    sortie = _run_powershell(
+        "(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update' "
+        "-Name AUOptions -ErrorAction SilentlyContinue).AUOptions"
+    )
+    try:
+        valeur = int(sortie)
+        return valeur >= 3
+    except (TypeError, ValueError):
+        return False
+
+
+def check_uac_max() -> bool:
+    """Vérifie que l'UAC est réglé au niveau le plus élevé (toujours notifier)."""
+    sortie = _run_powershell(
+        "(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' "
+        "-Name ConsentPromptBehaviorAdmin -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin"
+    )
+    return sortie.strip() == "2"
+
+
 main = Tk()
 main.title("Raccourcis durcissement de poste Windows 11")
 main.geometry("600x550")
@@ -124,6 +199,25 @@ elements = [
 
 admin_droits = est_admin()
 
+
+actions_admin_requis = {
+    action_bitlocker_c,
+    action_desactiver_smbv1,
+    action_renommer_admin_invite,
+    action_regler_uac_max,
+}
+
+
+actions_checks = {
+    action_parefeu_profils: check_parefeu_tous_profils_actif,
+    action_bitlocker_c: check_bitlocker_c_active,
+    action_protections_defender: check_defender_protections,
+    action_mises_a_jour_auto: check_mises_a_jour_auto,
+    action_desactiver_smbv1: check_smbv1_desactive,
+    action_regler_uac_max: check_uac_max,
+}
+
+
 tlong = [
     ("Renommer compte administrateur et désativé compte invité", action_renommer_admin_invite),
     ("Régler l'UAC au maximum (Demande de permission admin)", action_regler_uac_max),
@@ -139,8 +233,49 @@ for texte, action in elements:
     label.pack(side="left", fill="x", expand=True)
 
 
-    bouton = Button(ligne, text="M'y emmener !", font=b, command=action)
-    bouton.configure(bg="#003791")
+
+    corrige = False
+    check_fonction = actions_checks.get(action)
+    if callable(check_fonction):
+        corrige = check_fonction()
+
+    if corrige:
+
+        bouton = Button(
+            ligne,
+            text="Corrigé",
+            font=b,
+            bg="#2e7d32",
+            fg="white",
+            state=DISABLED,
+            disabledforeground="white",
+        )
+    else:
+
+        if (action in actions_admin_requis) and (not admin_droits):
+            bouton = Button(
+                ligne,
+                text="(Privilège administrateur\nrequis)",
+                font=n,
+                bg="#d32f2f",
+                fg="white",
+                state=DISABLED,
+                disabledforeground="white",
+                cursor="arrow",
+                width=20,
+                height=2,
+            )
+        else:
+   
+            bouton = Button(
+                ligne,
+                text="Y aller",
+                font=b,
+                bg="#003791",
+                fg="black",
+                command=action,
+            )
+
     bouton.pack(side="right")
     
 for texte, action in tlong:
@@ -152,23 +287,46 @@ for texte, action in tlong:
     label.pack(side="left", fill="x", expand=True)
 
 
-    bouton = Button(ligne, text="M'y emmener !", font=b, command=action)
-    bouton.configure(bg="#003791")
-    bouton.pack(side="right")
+    corrige = False
+    check_fonction = actions_checks.get(action)
+    if callable(check_fonction):
+        corrige = check_fonction()
 
-
-    if (action is action_desactiver_smbv1) and (not admin_droits):
-        bouton.configure(
-            text="Privilège administrateur\nrequis",
-            font=n,
-            fg="#ffffff",
-            bg="#d32f2f",
+    if corrige:
+        bouton = Button(
+            ligne,
+            text="Corrigé",
+            font=b,
+            bg="#2e7d32",
+            fg="white",
             state=DISABLED,
-            cursor="arrow",
-            disabledforeground="#ffffff",
-            width=20,
-            height=2,
+            disabledforeground="white",
         )
+    else:
+        if (action in actions_admin_requis) and (not admin_droits):
+            bouton = Button(
+                ligne,
+                text="(Privilège administrateur\nrequis)",
+                font=n,
+                bg="#d32f2f",
+                fg="white",
+                state=DISABLED,
+                disabledforeground="white",
+                cursor="arrow",
+                width=20,
+                height=2,
+            )
+        else:
+            bouton = Button(
+                ligne,
+                text="Y aller",
+                font=b,
+                bg="#003791",
+                fg="black",
+                command=action,
+            )
+
+    bouton.pack(side="right")
 
 
 pwd_frame = Frame(main, bg="#5b5b5b")
