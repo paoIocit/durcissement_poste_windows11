@@ -4,6 +4,14 @@ import os
 import random
 import string
 import tkinter.font as font
+import ctypes
+
+
+def est_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def lancer_action(nom_action):
@@ -100,6 +108,7 @@ main.iconbitmap('icon.ico')
 
 
 f = font.Font(family="Open Sans", size=12, weight="bold")
+n = font.Font(family="Open Sans", size=8, weight="bold")
 j = font.Font(family="Open Sans", size=10, weight="bold")
 b = font.Font(family="Open Sans", size=14, weight="bold")
 
@@ -111,6 +120,9 @@ elements = [
     ("Activer toutes les protections Windows Defender", action_protections_defender),
     ("Activer les mises à jour autmatique de Windows", action_mises_a_jour_auto),
 ]
+
+
+admin_droits = est_admin()
 
 tlong = [
     ("Renommer compte administrateur et désativé compte invité", action_renommer_admin_invite),
@@ -143,7 +155,20 @@ for texte, action in tlong:
     bouton = Button(ligne, text="M'y emmener !", font=b, command=action)
     bouton.configure(bg="#003791")
     bouton.pack(side="right")
-    
+
+
+    if (action is action_desactiver_smbv1) and (not admin_droits):
+        bouton.configure(
+            text="Privilège administrateur\nrequis",
+            font=n,
+            fg="#ffffff",
+            bg="#d32f2f",
+            state=DISABLED,
+            cursor="arrow",
+            disabledforeground="#ffffff",
+            width=20,
+            height=2,
+        )
 
 
 pwd_frame = Frame(main, bg="#5b5b5b")
